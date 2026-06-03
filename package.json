@@ -1,0 +1,17 @@
+{
+  "name": "notion-claude-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Notion DB の pending ページを GitHub Issue に起票し、claude-code-action に実装を引き継ぐブリッジ",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "bridge": "node src/bridge.js"
+  },
+  "dependencies": {
+    "@notionhq/client": "^2.3.0",
+    "octokit": "^4.1.0"
+  }
+}

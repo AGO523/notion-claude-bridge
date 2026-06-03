@@ -1,0 +1,38 @@
+# サンドボックス（対象）リポジトリの .github/workflows/claude.yml に設置するテンプレート。
+#
+# 前提:
+#   1. Claude GitHub App をリポジトリにインストール（https://github.com/apps/claude）
+#   2. リポジトリの Secrets に ANTHROPIC_API_KEY を登録
+#
+# ブリッジが作成する Issue の本文に @claude メンションが含まれるため、
+# issues.opened イベントで claude-code-action が起動する。
+name: Claude Code
+
+on:
+  issues:
+    types: [opened]
+  issue_comment:
+    types: [created]
+
+jobs:
+  claude:
+    # Issue 本文またはコメントに @claude が含まれる場合のみ実行
+    if: |
+      (github.event_name == 'issues' && contains(github.event.issue.body, '@claude')) ||
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          # allowed tools を最小化し、反復回数にも上限を設ける
+          claude_args: '--allowedTools "Edit,Write,Read,Grep,Glob,Bash(git diff:*),Bash(git log:*)" --max-turns 30'
