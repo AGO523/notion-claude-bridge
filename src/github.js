@@ -7,11 +7,20 @@ const octokit = new Octokit({ auth: config.githubToken });
 export const QUESTION_MARKER = '❓QUESTIONS';
 const CLARIFICATION_LABEL = 'needs-clarification';
 
-// Issue 本文。@claude メンションで claude-code-action が起動する。
+function parseRepo() {
+  const [owner, repo] = config.targetRepo.split('/');
+  if (!owner || !repo) {
+    throw new Error(`TARGET_REPO が owner/repo 形式ではありません: "${config.targetRepo}"`);
+  }
+  return { owner, repo };
+}
+
+// Issue 本文。requirements は Notion ページ本文を Markdown 化したもの。
+// @claude メンションで claude-code-action が起動する。
 // セキュリティ上の制約（範囲外変更の禁止など）もここで明示する。
-function buildIssueBody(task) {
+function buildIssueBody(requirements) {
   return [
-    task.body,
+    requirements,
     '',
     '---',
     '',
@@ -30,35 +39,27 @@ function buildIssueBody(task) {
   ].join('\n');
 }
 
-function parseRepo(targetRepo) {
-  const [owner, repo] = (targetRepo ?? '').split('/');
-  if (!owner || !repo) {
-    throw new Error(`target_repo が owner/repo 形式ではありません: "${targetRepo}"`);
-  }
-  return { owner, repo };
-}
-
-// Notion に記録した issue_url から owner / repo / issue 番号を復元する
-function parseIssueUrl(issueUrl) {
-  const m = (issueUrl ?? '').match(/github\.com\/([^/]+)\/([^/]+)\/issues\/(\d+)/);
-  if (!m) {
-    throw new Error(`issue_url を解釈できません: "${issueUrl}"`);
-  }
-  return { owner: m[1], repo: m[2], issueNumber: Number(m[3]) };
-}
-
-// サンドボックスリポジトリに Issue を作成して URL を返す
-export async function createIssue(task) {
-  const { owner, repo } = parseRepo(task.targetRepo);
+// 対象リポジトリに Issue を作成して URL を返す
+export async function createIssue(title, requirements) {
+  const { owner, repo } = parseRepo();
 
   const { data } = await octokit.rest.issues.create({
     owner,
     repo,
-    title: task.title,
-    body: buildIssueBody(task),
+    title,
+    body: buildIssueBody(requirements),
   });
 
   return { url: data.html_url, number: data.number };
+}
+
+// Notion に記録した Issue URL から owner / repo / issue 番号を復元する
+function parseIssueUrl(issueUrl) {
+  const m = (issueUrl ?? '').match(/github\.com\/([^/]+)\/([^/]+)\/issues\/(\d+)/);
+  if (!m) {
+    throw new Error(`Issue URL を解釈できません: "${issueUrl}"`);
+  }
+  return { owner: m[1], repo: m[2], issueNumber: Number(m[3]) };
 }
 
 // Issue 上の質問コメント（QUESTION_MARKER 始まり）を集計する

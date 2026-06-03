@@ -25,12 +25,13 @@ GitHub に Issue が起票され、内容を元に Claude が実装して Draft 
               │ GitHub Actions cron（5分おき、このリポジトリ）
               ▼
 [src/bridge.js]
-  1. Notion DB を query（status=pending を取得）
+  1. Notion DB を query（AIステータス=依頼 を取得）
   2. 各ページについて:
-     a. status を claiming に更新（多重起票ガード）
-     b. サンドボックスリポジトリに GitHub Issue 作成
-        （本文に @claude メンション + 実装指示）
-     c. status を issue_created に、issue_url を記録
+     a. AIステータスを 起票中 に更新（多重起票ガード）
+     b. ページ本文（ブロック）を Markdown に変換
+     c. サンドボックスリポジトリに GitHub Issue 作成
+        （本文 = ページ本文の Markdown + @claude メンション + 実装指示）
+     d. AIステータスを Issue作成済 に、Issue URL を記録
               ▼
 [claude-code-action]（サンドボックスリポジトリ側、Issue 作成イベントで即起動）
   → GitHub Actions ランナー上で Claude Code が実装
@@ -45,33 +46,46 @@ GitHub に Issue が起票され、内容を元に Claude が実装して Draft 
 - Secret 管理も GitHub Secrets に一本化、デプロイは git push のみ
 - GitHub Actions cron は起動が数分遅延しうるが、PoC の要件（5〜10分以内に Issue）には収まる
 
-## Notion DB スキーマ
+## Notion DB スキーマ（2026-06-03 改訂: 実運用の開発依頼 DB に合わせる）
+
+実運用の Notion は「開発依頼チケット」の DB で、`ID` / `プロダクト` / `ステータス` /
+`担当者` / `ウォッチャー` などのプロパティが既に運用されている。
+特に `ステータス` はチームの進捗管理に使用中のため、**自動化用の状態は混ぜない**。
+
+既存プロパティには一切触れず、自動化用に以下の **4つを追加するだけ**:
 
 | プロパティ | 型 | 用途 |
 |---|---|---|
-| `title` | Title | Issue / PR タイトル |
-| `body` | Rich text | 要件詳細 |
-| `target_repo` | Select | 対象リポジトリ（`owner/repo` 形式） |
-| `status` | Select | 下記の遷移図を参照 |
-| `issue_url` | URL | 生成された Issue |
-| `pr_url` | URL | 生成された Draft PR（フェーズ2で同期） |
-| `questions` | Rich text | Claude からの質問（ブリッジが書き戻す） |
-| `answer` | Rich text | 作業者の回答（ブリッジが Issue に転送する） |
-| `error` | Rich text | 失敗時のログ要約 |
+| `AIステータス` | セレクト | 下記の遷移図を参照。`依頼` にすると Claude への依頼になる |
+| `Issue URL` | URL | 生成された Issue（ブリッジが書き込み） |
+| `AI質問` | テキスト | Claude からの質問（ブリッジが書き戻す） |
+| `AI回答` | テキスト | 作業者の回答（ブリッジが Issue に転送する） |
 
-### status 遷移（ブリッジが扱う範囲）
+設計メモ:
+
+- **要件詳細はページ本文に書く**（プロパティではない）。実運用では `## 1. 依頼内容` のような
+  構造化された本文に課題・目的・実現案が書かれており、ブリッジがブロックを Markdown に
+  変換してそのまま Issue 本文（Claude への指示）にする
+- タイトルは既存のタイトル列をそのまま使う（ブリッジは名前ではなく型 = title で探すため、
+  列名が何であっても動く）
+- 対象リポジトリはプロパティではなく env（`TARGET_REPO`）で固定。横展開時にプロパティ化する
+- エラーは専用プロパティを作らず、`失敗` ステータス + ページへのコメントで通知する
+- ページ本文の画像・添付は Issue に転記しない（Notion の画像 URL は約1時間で失効するため。
+  「（添付ファイルは Notion ページを参照）」に置換される）
+
+### AIステータス遷移（ブリッジが扱う範囲）
 
 ```
-pending → claiming → issue_created ──→ needs_info → answered → in_progress ─┐
-                          │                 ↑（新しい質問が来たら戻る）      │
-                          │                 └────────────────────────────────┘
-                          │
-                          └─（質問なくそのまま実装 → Draft PR）
-どこかで失敗 / 質問ラウンド上限超過 → failed（error に内容を記録）
+依頼 → 起票中 → Issue作成済 ──→ 質問あり → 回答済 → 実装中 ─┐
+            │                       ↑（新しい質問が来たら戻る）│
+            │                       └──────────────────────────┘
+            │
+            └─（質問なくそのまま実装 → Draft PR）
+どこかで失敗 / 質問ラウンド上限超過 → 失敗（ページコメントに理由を記録）
 ```
 
 PR 作成以降は claude-code-action の責務。Notion への PR URL 書き戻しはフェーズ2
-（ブリッジが issue_created / in_progress のページの Issue を見に行き、リンクされた PR を検出して更新）。
+（ブリッジが Issue作成済 / 実装中 のページの Issue を見に行き、リンクされた PR を検出して更新）。
 
 ### Q&A ループ（実装済み）
 
@@ -79,15 +93,15 @@ Claude が要件に不明点を見つけた場合、Notion から出ずに質疑
 
 1. Claude（claude-code-action）は不明点があると Issue に `❓QUESTIONS` で始まるコメントを投稿し、
    `needs-clarification` ラベルを付けて実装を中断する（Issue 本文の指示で制御）
-2. ブリッジが次回実行時に質問コメントを検出 → Notion の `questions` に書き戻し、
-   status を `needs_info` に変更、ページにコメントを追加して作業者に知らせる
-3. 作業者は Notion 上で `answer` に回答を記入し、status を `answered` に変更
+2. ブリッジが次回実行時に質問コメントを検出 → Notion の `AI質問` に書き戻し、
+   AIステータスを `質問あり` に変更、ページにコメントを追加して作業者に知らせる
+3. 作業者は Notion 上で `AI回答` に回答を記入し、AIステータスを `回答済` に変更
 4. ブリッジが回答を検出 → Issue に「@claude 回答です…」とコメント転送
-   （これで claude-code-action が再起動し実装続行）→ status を `in_progress` に変更
+   （これで claude-code-action が再起動し実装続行）→ AIステータスを `実装中` に変更
 5. 再度質問が来たら 2 に戻る。質問ラウンドが上限（デフォルト3回、`MAX_QUESTION_ROUNDS`）を
-   超えたら `failed` にして人間に差し戻す
+   超えたら `失敗` にして人間に差し戻す
 
-冪等性: ブリッジは「Issue 上の最新の質問コメント」と「Notion の `questions`」を比較し、
+冪等性: ブリッジは「Issue 上の最新の質問コメント」と「Notion の `AI質問`」を比較し、
 同一なら何もしない。各ホップに cron 間隔（最大5分 + Actions 起動遅延）が乗る点に注意。
 
 ## 技術スタック（確定済み）
@@ -143,10 +157,12 @@ Notion の body はそのまま Issue に転記されるため、Notion DB 自�
 
 ### Step 2: 検証用リソース準備
 
-- [ ] Notion で検証用 DB を作成（上記スキーマ）
-- [ ] Notion Internal Integration を作成、DB に接続
+- [ ] Notion の DB（実運用形式 or 検証用コピー）に自動化用プロパティ4つを追加
+      （`AIステータス` / `Issue URL` / `AI質問` / `AI回答`、上記スキーマ参照）
+- [ ] Notion Internal Integration を作成（読み取り / 更新 / コメント挿入）、DB に接続
 - [ ] GitHub Fine-grained PAT を作成（サンドボックスリポジトリ限定、Issues: Write）
 - [ ] このリポジトリの Secrets に登録: `NOTION_TOKEN` / `NOTION_DATABASE_ID` / `BRIDGE_GITHUB_TOKEN`
+- [ ] このリポジトリの Variables に登録: `TARGET_REPO`（owner/repo 形式）
 
 ### Step 3: サンドボックス側のセットアップ
 
@@ -193,8 +209,9 @@ Notion の body はそのまま Issue に転記されるため、Notion DB 自�
 
 ## 横展開を見据えた設計上のメモ
 
-- `target_repo` を Notion 側で選択させる設計なので、リポジトリ追加は
-  Select 選択肢追加 + 対象リポジトリへの claude.yml 設置 + PAT のスコープ追加で済む
+- 対象リポジトリは現状 env（`TARGET_REPO`）固定。横展開時は Notion に
+  `対象リポジトリ`（セレクト）プロパティを追加してページごとに選択させる設計に戻す
+  （+ 対象リポジトリへの claude.yml 設置 + PAT のスコープ追加）
 - リポジトリ別の挙動（verify コマンドなど）は対象リポジトリの `CLAUDE.md` に書けば
   claude-code-action が自動で読む（ブリッジ側の設定外部化は不要になった）
 

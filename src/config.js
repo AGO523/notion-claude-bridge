@@ -11,8 +11,10 @@ export const config = {
   notionToken: required('NOTION_TOKEN'),
   notionDatabaseId: required('NOTION_DATABASE_ID'),
   githubToken: required('BRIDGE_GITHUB_TOKEN'),
-  // 1回の実行で処理する pending 数の上限
+  // Issue を立てる対象リポジトリ（owner/repo 形式）。横展開時に Notion プロパティ化する
+  targetRepo: required('TARGET_REPO'),
+  // 1回の実行で処理する依頼数の上限
   maxTasksPerRun: Number(process.env.MAX_TASKS_PER_RUN ?? 5),
-  // 質問ラウンド数の上限（超えたら failed にして人間に差し戻す）
+  // 質問ラウンド数の上限（超えたら 失敗 にして人間に差し戻す）
   maxQuestionRounds: Number(process.env.MAX_QUESTION_ROUNDS ?? 3),
 };
