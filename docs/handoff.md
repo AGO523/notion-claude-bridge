@@ -52,20 +52,43 @@ GitHub に Issue が起票され、内容を元に Claude が実装して Draft 
 | `title` | Title | Issue / PR タイトル |
 | `body` | Rich text | 要件詳細 |
 | `target_repo` | Select | 対象リポジトリ（`owner/repo` 形式） |
-| `status` | Select | `pending` / `claiming` / `issue_created` / `failed`（PR 同期を入れる場合は `pr_created` / `done` を追加） |
+| `status` | Select | 下記の遷移図を参照 |
 | `issue_url` | URL | 生成された Issue |
 | `pr_url` | URL | 生成された Draft PR（フェーズ2で同期） |
+| `questions` | Rich text | Claude からの質問（ブリッジが書き戻す） |
+| `answer` | Rich text | 作業者の回答（ブリッジが Issue に転送する） |
 | `error` | Rich text | 失敗時のログ要約 |
 
 ### status 遷移（ブリッジが扱う範囲）
 
 ```
-pending → claiming → issue_created
-                  └→ failed（error に内容を記録）
+pending → claiming → issue_created ──→ needs_info → answered → in_progress ─┐
+                          │                 ↑（新しい質問が来たら戻る）      │
+                          │                 └────────────────────────────────┘
+                          │
+                          └─（質問なくそのまま実装 → Draft PR）
+どこかで失敗 / 質問ラウンド上限超過 → failed（error に内容を記録）
 ```
 
 PR 作成以降は claude-code-action の責務。Notion への PR URL 書き戻しはフェーズ2
-（ブリッジが issue_created のページの Issue を見に行き、リンクされた PR を検出して更新）。
+（ブリッジが issue_created / in_progress のページの Issue を見に行き、リンクされた PR を検出して更新）。
+
+### Q&A ループ（実装済み）
+
+Claude が要件に不明点を見つけた場合、Notion から出ずに質疑応答できる:
+
+1. Claude（claude-code-action）は不明点があると Issue に `❓QUESTIONS` で始まるコメントを投稿し、
+   `needs-clarification` ラベルを付けて実装を中断する（Issue 本文の指示で制御）
+2. ブリッジが次回実行時に質問コメントを検出 → Notion の `questions` に書き戻し、
+   status を `needs_info` に変更、ページにコメントを追加して作業者に知らせる
+3. 作業者は Notion 上で `answer` に回答を記入し、status を `answered` に変更
+4. ブリッジが回答を検出 → Issue に「@claude 回答です…」とコメント転送
+   （これで claude-code-action が再起動し実装続行）→ status を `in_progress` に変更
+5. 再度質問が来たら 2 に戻る。質問ラウンドが上限（デフォルト3回、`MAX_QUESTION_ROUNDS`）を
+   超えたら `failed` にして人間に差し戻す
+
+冪等性: ブリッジは「Issue 上の最新の質問コメント」と「Notion の `questions`」を比較し、
+同一なら何もしない。各ホップに cron 間隔（最大5分 + Actions 起動遅延）が乗る点に注意。
 
 ## 技術スタック（確定済み）
 
@@ -107,15 +130,16 @@ Notion の body はそのまま Issue に転記されるため、Notion DB 自�
 
 ## 段階的タスク
 
-### Step 1: ブリッジ実装（このリポジトリ）
+### Step 1: ブリッジ実装（このリポジトリ）✅ 完了
 
-- [ ] `package.json`（ESM、`@notionhq/client` + `octokit`）
-- [ ] `src/config.js` — env 読み込み・検証
-- [ ] `src/notion.js` — pending 取得 / ページ更新
-- [ ] `src/github.js` — Issue 作成（@claude メンション付き本文の組み立て）
-- [ ] `src/bridge.js` — エントリポイント、claiming ガード付きループ
-- [ ] `.github/workflows/bridge.yml` — cron + workflow_dispatch
-- [ ] `.env.example` / `.gitignore`
+- [x] `package.json`（ESM、`@notionhq/client` + `octokit`）
+- [x] `src/config.js` — env 読み込み・検証
+- [x] `src/notion.js` — status 別取得 / ページ更新 / コメント追加（通知）
+- [x] `src/github.js` — Issue 作成 / 質問コメント検出 / 回答コメント転送
+- [x] `src/bridge.js` — エントリポイント（起票・質問検出・回答転送の3フェーズ）
+- [x] `.github/workflows/bridge.yml` — cron + workflow_dispatch
+- [x] `.env.example` / `.gitignore`
+- [x] Q&A ループ（質問検出 → Notion 書き戻し → 回答転送）
 
 ### Step 2: 検証用リソース準備
 

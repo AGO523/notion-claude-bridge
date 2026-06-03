@@ -2,6 +2,33 @@
 
 新しい作業をしたら日付ごとに追記する。最新が上。
 
+## 2026-06-03（3回目）
+
+### 決定事項
+
+- **Q&A ループを実装**: Claude が要件に不明点を見つけた場合、Notion 上で質疑応答できる仕組み
+  - Claude は Issue に `❓QUESTIONS` コメント + `needs-clarification` ラベルで質問（Issue 本文の指示で制御）
+  - ブリッジが質問を検出して Notion の `questions` に書き戻し、status を `needs_info` に
+  - 作業者が `answer` に回答して status を `answered` にすると、ブリッジが Issue にコメント転送
+    （@claude メンション付きなので claude-code-action が再起動）→ `in_progress`
+  - 質問ラウンド上限は3回（超過で failed）
+- Notion への通知は**ページへのコメント追加のみ**（メンションは使わない方針）
+- Notion スキーマに `questions` / `answer`（Rich text）と
+  status 選択肢 `needs_info` / `answered` / `in_progress` を追加
+
+### 完了
+
+- [x] `src/notion.js` — status 別取得の汎用化、questions 書き込み、コメント追加（notifyPage）
+- [x] `src/github.js` — 質問コメント検出（getQuestionState）、回答転送（postAnswerComment）
+- [x] `src/bridge.js` — 起票・質問検出・回答転送の3フェーズ構成に拡張
+- [x] `docs/handoff.md` — スキーマ・status 遷移・Q&A ループを反映
+
+### 次にやること
+
+- [ ] Step 2: Notion DB 作成（questions / answer 含む）+ Integration 発行、PAT 発行、Secrets 登録
+- [ ] Step 3: サンドボックスリポジトリの選定と claude-code-action セットアップ
+- [ ] Step 4: E2E 検証（質問が出るケース・出ないケースの両方）
+
 ## 2026-06-03（2回目）
 
 ### 決定事項
