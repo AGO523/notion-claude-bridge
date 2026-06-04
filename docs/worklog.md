@@ -2,6 +2,26 @@
 
 新しい作業をしたら日付ごとに追記する。最新が上。
 
+## 2026-06-04
+
+### 決定事項
+
+- **サンドボックスは `AGO523/iwashi` に決定**（プライベートリポジトリ）
+
+### 完了
+
+- [x] Notion にテスト DB「開発依頼（テスト）」を作成（実運用と同構成 + 自動化用4プロパティ）
+- [x] Notion Internal Integration（コネクト）`notion-claude-bridge` を発行、DB に接続
+- [x] ローカルで事前チェック実行（DB 接続 / プロパティ型 / 本文 Markdown 変換、すべて OK）
+  - つまずき: DB ID の控え間違いで object_not_found → API の search で正しい ID を特定して解決
+
+### 次にやること
+
+- [ ] GitHub Fine-grained PAT 発行（iwashi 限定、Issues: Read and write）
+- [ ] iwashi 側: branch protection / Claude GitHub App / ANTHROPIC_API_KEY / claude.yml 設置
+- [ ] ローカルで `npm run bridge` → Issue 起票 → Draft PR の E2E 確認
+- [ ] 本体リポジトリの Secrets / Variables 登録、cron 稼働開始
+
 ## 2026-06-03（4回目）
 
 ### 決定事項
