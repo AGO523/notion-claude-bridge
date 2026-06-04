@@ -1,0 +1,33 @@
+name: Notion Bridge
+
+on:
+  schedule:
+    - cron: '*/5 * * * *' # 5分おき（UTC 基準、混雑時は数分遅延しうる）
+  workflow_dispatch: # 手動実行（デバッグ用）
+
+# 多重起動の抑止（前回の実行が長引いた場合は新規実行をスキップ）
+concurrency:
+  group: notion-bridge
+  cancel-in-progress: false
+
+jobs:
+  bridge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - run: node src/bridge.js
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
+          BRIDGE_GITHUB_TOKEN: ${{ secrets.BRIDGE_GITHUB_TOKEN }}
+          # Settings → Secrets and variables → Actions → Variables で登録（owner/repo 形式）
+          TARGET_REPO: ${{ vars.TARGET_REPO }}
